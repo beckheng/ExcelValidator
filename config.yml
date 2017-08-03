@@ -1,0 +1,10 @@
+#encoding utf8
+
+excelPaths:
+  - E:\github\ExcelValidator\excels
+
+#为保持一致性,和原始的配置表不在同个目录
+rulePath: E:\github\ExcelValidator\rules
+
+# Excel配置表有效数据起始行值, 0 base的
+startRow: 1
