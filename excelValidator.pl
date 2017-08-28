@@ -26,7 +26,8 @@ my %methods = (
 	"MIN" => \&_validate_min,
 	"MAX" => \&_validate_max,
 	"SUM_VAL" => \&_validate_sum,
-	"UNIQUE_WITH" => \&_validate_unique_with,
+	"UNIQUE_WITH" => \&_validate_unique_with, #这是指没有重复的值
+	"PK_WITH" => \&_validate_pk_with, #这是指复合键值
 );
 
 #读取配置参数文件,如果没有则使用和程序目录下一样的config.yml
@@ -57,14 +58,21 @@ foreach my $tmpPath ($rulePath, @$searchPaths){
 
 #先读入所有校验规则
 my %rules = ();
+print "Load Rules From Path " . $rulePath . "\n";
 find({ wanted => \&readRules, follow => 0, no_chdir => 0 }, $rulePath);
+
+#需要全局处理的变量
+my (%pkMap);
 
 #遍历要校验的文件
 foreach my $p (@$searchPaths){
+	my $tmpTime = time();
 	print "Start Process " . $p . "\n";
 	find({ wanted => \&readExcelFile, follow => 0, no_chdir => 0 }, $p);
-	print "End Process " . $p . "\n";
+	print "End Process " . $p . " usedTime " . (time() - $tmpTime) . "\n";
 }
+
+print "Complete usedTime " . (time() - $startTime) . "\n";
 
 #读取所有规则文件
 sub readRules{
@@ -90,7 +98,7 @@ sub readRules{
 		die "Rule for " . $nameOnly . " is duplicate at file " . $file;
 	}
 	
-	print "Load rules file " . $file . "\n";
+	print "Load rules file " . $nameOnly . "\n";
 	
 	$rules{$nameOnly} = {};
 	
@@ -107,13 +115,17 @@ sub readRules{
 		$ss->setCurrentSheetNum($sheetIndex);
 		my $sheetName = $ss->currentSheetName();
 		
+		my $data = $ss->getFirstRow();
+		if ($data->[0] ne decode("utf8", "校验规则")){
+			next;
+		}
+		
 		if (!exists($rules{$nameOnly}->{$sheetName})){
 			$rules{$nameOnly}->{$sheetName} = {};
 		}
 		
 		my %fieldMap = ();
 		
-		my $data = $ss->getFirstRow();
 		for (my $i = 1; $i < scalar(@$data); $i++){
 			$fieldMap{uc($data->[$i])} = $i;
 		}
@@ -133,6 +145,10 @@ sub readRules{
 					"SUM_WITH" => $data->[$fieldMap{"SUM_WITH"}],
 					"UNIQUE_WITH" => $data->[$fieldMap{"UNIQUE_WITH"}],
 				};
+				
+				if (exists($fieldMap{"PK_WITH"})){
+					$fieldValidator->{"PK_WITH"} = $data->[$fieldMap{"PK_WITH"}];
+				}
 				
 				$rules{$nameOnly}->{$sheetName}->{$fieldName} = $fieldValidator;
 			}
@@ -173,6 +189,9 @@ sub readExcelFile{
 			next;
 		}
 		
+		#全局变量初始化,暂时不支持跨excel sheet,所以是每个sheet就重新初始化一次.
+		%pkMap = ();
+		
 		my $curSheetRules = $curExcelRules->{$sheetName};
 		
 		my ($data);
@@ -182,7 +201,7 @@ sub readExcelFile{
 				foreach my $col (keys(%$curSheetRules)){
 					my $index = ExcelValidatorUtil::colNameToIndex($col);
 					my $val = $data->[$index];
-					&validate($curSheetRules->{$col}, $val, $data);
+					&validate(decode("gbk", $nameOnly), $sheetName, $curSheetRules->{$col}, $val, $data);
 				}
 			}
 		}
@@ -191,6 +210,8 @@ sub readExcelFile{
 
 #统一的校验规则都通过这个函数来调用
 sub validate{
+	my $name = shift @_; #excel文件名
+	my $sheetName = shift @_; #sheet表名称
 	my $rules = shift @_; #要校验的所有规则
 	my $val = shift @_; #要校验的数据
 	my $data = shift @_; #完整的行数据
@@ -203,7 +224,7 @@ sub validate{
 		my $m = $methods{$r};
 		my $res = $m->($rules, $val, $data);
 		if (!$res){
-			print "Test Row " . $data->[0] . " for " . $val . " " . $r . " [" . ExcelValidatorUtil::getHumanVal($rules->{$r}) . "] Result " . $res . "\n";
+			print encode("gbk", "Test Row " . $name . " " . $sheetName . " " . $data->[0] . " for " . $val . " " . $r . " [" . ExcelValidatorUtil::getHumanVal($rules->{$r}) . "] Result " . $res) . "\n";
 		}
 	}
 }
@@ -313,6 +334,34 @@ sub _validate_unique_with{
 			return 0;
 		}
 	}
+	
+	return 1;
+}
+
+sub _validate_pk_with {
+	my $rules = shift @_;
+	my $val = shift @_;
+	my $data = shift @_;
+	
+	my $pkWith = $rules->{"PK_WITH"};
+	if (length($pkWith) == 0){
+		return 1;
+	}
+	
+	my @allCellVals = ExcelValidatorUtil::getList($val);
+	my @withCells = ExcelValidatorUtil::getList($pkWith);
+	foreach my $c (@withCells){
+		my $cix = ExcelValidatorUtil::colNameToIndex($c);
+		
+		push(@allCellVals, ExcelValidatorUtil::getList($data->[$cix]));
+	}
+	
+	my $valStr = join(",", @withCells) . "______" . join(",", @allCellVals);
+	if (exists($pkMap{$valStr})){
+		return 0;
+	}
+	
+	$pkMap{$valStr} = 1;
 	
 	return 1;
 }
