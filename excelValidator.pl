@@ -61,6 +61,8 @@ my %rules = ();
 print "Load Rules From Path " . $rulePath . "\n";
 find({ wanted => \&readRules, follow => 0, no_chdir => 0 }, $rulePath);
 
+my $errMsg = ""; #最后列出所有的错误信息
+
 #需要全局处理的变量
 my (%pkMap);
 
@@ -73,6 +75,10 @@ foreach my $p (@$searchPaths){
 }
 
 print "Complete usedTime " . (time() - $startTime) . "\n";
+
+if ($errMsg){
+	die "Error:\n" . $errMsg . "\n";
+}
 
 #读取所有规则文件
 sub readRules{
@@ -224,7 +230,7 @@ sub validate{
 		my $m = $methods{$r};
 		my $res = $m->($rules, $val, $data);
 		if (!$res){
-			print encode("gbk", "Test Row " . $name . " " . $sheetName . " " . $data->[0] . " for " . $val . " " . $r . " [" . ExcelValidatorUtil::getHumanVal($rules->{$r}) . "] Result " . $res) . "\n";
+			$errMsg .= encode("gbk", "Test Row " . $name . " " . $sheetName . " " . $data->[0] . " for " . $val . " " . $r . " [" . ExcelValidatorUtil::getHumanVal($rules->{$r}) . "] Result " . $res) . "\n";
 		}
 	}
 }
